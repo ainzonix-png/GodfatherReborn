@@ -1,0 +1,4 @@
+# Binaries are stored as they are.
+*.exe binary
+*.png binary
+*.bin binary
