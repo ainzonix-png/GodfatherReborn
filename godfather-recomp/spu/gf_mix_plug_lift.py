@@ -150,21 +150,60 @@ def main():
 #include <windows.h>
 #endif
 /* [gfmix] every ~10 s: lifted mixer calls served vs resolver misses that fell through (any code). Per-thread counters. */
-static volatile long s_ok, s_no; static volatile long long s_t0;
-static SPU_PLUG_TLS unsigned t_ok, t_no;
+static volatile long s_ok, s_no, s_f2pos, s_f2neg, s_fast2_init, s_fast2_on;
+static volatile long long s_t0;
+static SPU_PLUG_TLS unsigned t_ok, t_no, t_f2pos, t_f2neg;
 static void gfmix_flush(void)
 {
-    InterlockedExchangeAdd(&s_ok, (long)t_ok); InterlockedExchangeAdd(&s_no, (long)t_no); t_ok = t_no = 0;
+    InterlockedExchangeAdd(&s_ok, (long)t_ok); InterlockedExchangeAdd(&s_no, (long)t_no);
+    InterlockedExchangeAdd(&s_f2pos, (long)t_f2pos); InterlockedExchangeAdd(&s_f2neg, (long)t_f2neg);
+    t_ok = t_no = t_f2pos = t_f2neg = 0;
     long long now = (long long)GetTickCount64();
     if (!s_t0) s_t0 = now;
     if (now - s_t0 >= 10000 && InterlockedExchange64((volatile long long*)&s_t0, now) != now) {
         extern volatile long g_spu_plug_rejoins;
         fprintf(stderr, "[gfmix] v1039A 10s: %ld lifted mixer calls served, %ld other resolver misses, %ld interpreter hand-backs\n",
                 InterlockedExchange(&s_ok, 0), InterlockedExchange(&s_no, 0), InterlockedExchange(&g_spu_plug_rejoins, 0));
+        if (InterlockedCompareExchange(&s_fast2_on, 0, 0))
+            fprintf(stderr, "[gfmix] v1129S fast2 cache: %ld lifted hits, %ld safe negative hits\n",
+                    InterlockedExchange(&s_f2pos, 0), InterlockedExchange(&s_f2neg, 0));
     }
 }
 static inline void gfmix_stat(int ok) { if (ok) t_ok++; else t_no++; if (((t_ok + t_no) & 4095u) == 0) gfmix_flush(); }
 static uint32_t gfmix_fnv32(const uint8_t* p) { uint32_t h = 2166136261u; for (int i = 0; i < 32; i++) h = (h ^ p[i]) * 16777619u; return h; }
+#define GFMIX_FAST2_N 1024u
+typedef struct {
+    uint32_t pc, base;
+    uint16_t tab;
+    uint8_t kind, code[32];
+} gfmix_fast2_ent;
+static SPU_PLUG_TLS gfmix_fast2_ent t_gfmix_fast2[GFMIX_FAST2_N];
+static volatile long s_fast2_diag_init, s_fast2_diag_on, s_fast2_diag_n;
+static int gfmix_fast2_on(void)
+{
+    if (s_fast2_init == 2) return s_fast2_on != 0;   /* v1129H: decided -> plain loads, no locked op per probe */
+    if (InterlockedCompareExchange(&s_fast2_init, 1, 0) == 0) {
+        const char* e = getenv("GF_MIX_FAST2");
+        const long on = (e && e[0] == '1' && e[1] == 0) ? 1 : 0;
+        InterlockedExchange(&s_fast2_on, on);
+        if (on) fprintf(stderr, "[v1129S] GF_MIX_FAST2 content-keyed resolver cache: ON\n");
+        InterlockedExchange(&s_fast2_init, 2);
+    } else {
+        while (InterlockedCompareExchange(&s_fast2_init, 2, 2) != 2) SwitchToThread();
+    }
+    return InterlockedCompareExchange(&s_fast2_on, 0, 0) != 0;
+}
+static int gfmix_fast2_diag(void)
+{
+    if (InterlockedCompareExchange(&s_fast2_diag_init, 1, 0) == 0) {
+        const char* e = getenv("GF_MIX_FAST2_DIAG");
+        InterlockedExchange(&s_fast2_diag_on, (e && e[0] == '1' && e[1] == 0) ? 1 : 0);
+        InterlockedExchange(&s_fast2_diag_init, 2);
+    } else {
+        while (InterlockedCompareExchange(&s_fast2_diag_init, 2, 2) != 2) SwitchToThread();
+    }
+    return InterlockedCompareExchange(&s_fast2_diag_on, 0, 0) != 0;
+}
 /* Relocatable: served wherever the module is loaded, only when the module's 32-byte header (magic + id) at the
  * implied base AND the function's full [start,end) instruction bytes match the capture; GF_MIX_LIFT=0 turns the
  * whole table off (interpreter, the old behaviour). Direct lifted transfers are not rechecked because modules load whole. */
@@ -188,11 +227,31 @@ spu_plug_fn spu_plug_lookup_probe(spu_context* ctx, uint32_t pc, int* stable_mis
 spu_plug_fn spu_plug_lookup_probe(spu_context* ctx, uint32_t pc, int* stable_miss)
 {
     if (stable_miss) *stable_miss = 0;
-    if (!gfmix_on()) return 0;
+    /* v1129H: with GF_MIX_FAST2 on and GF_MIX_LIFT decided, read the decision with plain loads (gfmix_on() does a locked
+     * compare-exchange on a line shared by every SPU host thread on each call). Same result as gfmix_on(). */
+    if (!((s_fast2_init == 2 && s_fast2_on && s_on_init == 2) ? (s_on != 0) : gfmix_on())) return 0;
     pc &= SPU_LS_MASK;
     if (pc + 32 > SPU_LS_SIZE) return 0;
     { uint32_t w; memcpy(&w, ctx->ls + pc, 4); const uint32_t b = (w * 0x9E3779B1u) >> 16;
       if (!(s_gfmix_pf[b >> 5] & (1u << (b & 31)))) { if (stable_miss) *stable_miss = 1; gfmix_stat(0); return 0; } }
+    const int fast2 = gfmix_fast2_on();
+    const uint32_t ck = (pc >> 2) & (GFMIX_FAST2_N - 1u);
+    gfmix_fast2_ent* const ce = &t_gfmix_fast2[ck];
+    if (fast2 && ce->kind && ce->pc == pc && memcmp(ce->code, ctx->ls + pc, sizeof ce->code) == 0) {
+        if (ce->kind == 2) {
+            t_f2neg++; gfmix_stat(0); return 0;
+        }
+        const gfmix_entry* e = &s_gfmix_tab[ce->tab];
+        const uint32_t rel = e->off - s_gfmix_org[e->blob];
+        const uint8_t* img = s_gfmix_img[e->blob];
+        if (ce->base + 32 <= SPU_LS_SIZE && pc + e->len <= SPU_LS_SIZE &&
+            memcmp(ctx->ls + ce->base, img, 32) == 0 &&
+            memcmp(ctx->ls + pc, img + rel, e->len) == 0) {
+            g_spu_frag_delta = ce->base - s_gfmix_org[e->blob];
+            t_f2pos++; gfmix_stat(1); return e->fn;
+        }
+        ce->kind = 0;
+    }
     const uint32_t h = gfmix_fnv32(ctx->ls + pc);
     int lo = 0, hi = (int)(sizeof s_gfmix_tab / sizeof s_gfmix_tab[0]) - 1;
     while (lo < hi) { int m = (lo + hi) >> 1; if (s_gfmix_tab[m].h < h) lo = m + 1; else hi = m; }
@@ -211,8 +270,24 @@ spu_plug_fn spu_plug_lookup_probe(spu_context* ctx, uint32_t pc, int* stable_mis
     }
     if (hit) {
         g_spu_frag_delta = hit_base - s_gfmix_org[hit->blob];          /* lifted at the capture address */
+        if (fast2) {
+            ce->pc = pc; ce->base = hit_base; ce->tab = (uint16_t)(hit - s_gfmix_tab); ce->kind = 1;
+            memcpy(ce->code, ctx->ls + pc, sizeof ce->code);
+        }
         gfmix_stat(1);
         return hit->fn;
+    }
+    if (fast2 && s_gfmix_tab[lo].h != h) {
+        ce->pc = pc; ce->base = 0; ce->tab = 0; ce->kind = 2;
+        memcpy(ce->code, ctx->ls + pc, sizeof ce->code);
+    }
+    if (fast2 && gfmix_fast2_diag()) {
+        const long n = InterlockedIncrement(&s_fast2_diag_n);
+        if (n <= 64) {
+            uint32_t w[4]; memcpy(w, ctx->ls + pc, sizeof w);
+            fprintf(stderr, "[gfmix-fast2-miss] img=%d ovl=%d pc=0x%05X hash-candidate=%d words=%08X %08X %08X %08X\n",
+                    ctx->image_id, ctx->resident_ovl, pc, s_gfmix_tab[lo].h == h, w[0], w[1], w[2], w[3]);
+        }
     }
     gfmix_stat(0);
     return 0;
