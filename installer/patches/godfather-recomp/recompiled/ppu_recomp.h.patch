@@ -1,0 +1,16 @@
+--- a/godfather-recomp/recompiled/ppu_recomp.h
++++ b/godfather-recomp/recompiled/ppu_recomp.h
+@@ -80,6 +80,13 @@
+ void     vm_write16(uint64_t addr, uint16_t val);
+ void     vm_write32(uint64_t addr, uint32_t val);
+ void     vm_write64(uint64_t addr, uint64_t val);
++
++/* Godfather high-refresh patch state. The main-frame timer is created in
++ * ppu_recomp_000.cpp and consumed by limiter/game-clock code in
++ * ppu_recomp_002.cpp. The timer EA keeps the fractional-period patch scoped
++ * to this title object rather than changing unrelated engine timers. */
++extern uint32_t g_godfather_frame_limiter_ea;
++extern int      g_godfather_target_fps;
+ /* stwcx./stdcx. store-conditional: atomically store `val` at `addr` iff the raw
+  * big-endian guest word still equals `expected` (the value the paired lwarx/ldarx
+  * loaded). Returns 1 if the reservation held (store applied), 0 otherwise. This

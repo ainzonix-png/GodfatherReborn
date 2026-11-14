@@ -1,0 +1,19 @@
+--- a/godfather-recomp/spu/spu_workloads.c
++++ b/godfather-recomp/spu/spu_workloads.c
+@@ -16,6 +16,7 @@
+ extern void spu_0000_at_00C53080_spu_recomp_register(void);
+ extern void spu_0001_at_00C61000_spu_func_0003F908(spu_context*);
+ extern void spu_0001_at_00C61000_spu_recomp_register(void);
++extern void godfather_live_spu_recomp_register(void);
+ extern void spu_0002_at_00CA2580_spu_func_00000090(spu_context*);
+ extern void spu_0002_at_00CA2580_spu_recomp_register(void);
+ 
+@@ -25,7 +26,7 @@
+     spu_workload_register_img(0xB9DA94DFDE861844ULL, spu_0000_at_00C53080_spu_func_00000090, 1, "spu_0000_at_00C53080");
+     spu_workload_register_img(0x8F60C206513BE920ULL, spu_0000_at_00C53080_spu_func_00000090, 1, "spu_0000_at_00C53080.text");
+     { static const unsigned char sig[16] = { 0x42, 0x62, 0x3C, 0x02, 0x43, 0xAE, 0x70, 0x82, 0x42, 0xBB, 0x9B, 0x02, 0x43, 0xB7, 0x11, 0x82 }; spu_overlay_register_sig(sig, 1); }
+-    spu_begin_image(2); spu_0001_at_00C61000_spu_recomp_register();
++    spu_begin_image(2); spu_0001_at_00C61000_spu_recomp_register(); godfather_live_spu_recomp_register();
+     spu_workload_register_img(0x8057A8D9940BEB51ULL, spu_0001_at_00C61000_spu_func_0003F908, 2, "spu_0001_at_00C61000");
+     spu_workload_register_img(0x04C5ECA4B47C0FDEULL, spu_0001_at_00C61000_spu_func_0003F908, 2, "spu_0001_at_00C61000.text");
+     { static const unsigned char sig[16] = { 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }; spu_overlay_register_sig(sig, 2); }

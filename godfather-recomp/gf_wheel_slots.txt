@@ -1,0 +1,6 @@
+# v1109A weapon wheel position (0..7 ring from the top clockwise, 8..11 d-pad U/R/D/L) -> inventory slot, learned in play
+2 4
+5 5
+6 1
+7 0
+11 7
