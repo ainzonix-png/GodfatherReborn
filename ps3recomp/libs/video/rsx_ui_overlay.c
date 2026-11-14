@@ -2453,7 +2453,8 @@ static void gfd_build(void)
  * name below it), in the street name's grey with a soft shadow, while a car has more than one target to choose from. The key
  * is a prompt icon from ui_font.bin (gf_uifont_build.py): the D-pad on a controller, else the key cap of GF_GPS_KEY. */
 extern volatile unsigned long long g_gps_hint_t; extern volatile int g_gps_key;
-static int gps_want(void) { return GetTickCount64() - g_gps_hint_t < 400; }
+extern int (*volatile g_pad_menu_fn)(void);   /* cellPad.c: the game's pause menu / map is open */
+static int gps_want(void) { return GetTickCount64() - g_gps_hint_t < 400 && !(g_pad_menu_fn && g_pad_menu_fn() > 0); }
 static void gps_build(void)
 {
     if (!gps_want()) return;
