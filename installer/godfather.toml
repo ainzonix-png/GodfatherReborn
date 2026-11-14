@@ -49,6 +49,8 @@ include = [
   "godfather-recomp/assets/gf_blood.bin",
   "godfather-recomp/assets/gf_sfx_bodyhit.bin",
   "godfather-recomp/assets/gf_kbm_glyphs.bin",
+  "godfather-recomp/assets/gf_gps.bin",
+  "godfather-recomp/assets/ui_font.bin",
   "godfather-recomp/texreplace/",
 ]
 exclude = [
@@ -70,6 +72,8 @@ loose = [
   "godfather-recomp/assets/gf_blood.bin",
   "godfather-recomp/assets/gf_sfx_bodyhit.bin",
   "godfather-recomp/assets/gf_kbm_glyphs.bin",
+  "godfather-recomp/assets/gf_gps.bin",
+  "godfather-recomp/assets/ui_font.bin",
   "godfather-recomp/texreplace/**",
 ]
 full_patch_ok = []
@@ -191,6 +195,20 @@ title = "Weapon wheel icons and the main-menu logo"
 run = ["{python}", "{port}/tools/gf_texreplace_build.py", "{usrdir}", "{port}/texreplace"]
 optional = true
 outputs = ["godfather-recomp/texreplace/**"]
+
+[[step]]
+id = "ui-font"
+title = "Font of the port's own menus (store, inventory, dialogue, trainer, hints)"
+run = ["{python}", "{port}/tools/gf_uifont_build.py", "{usrdir}", "{port}/assets/ui_font.bin"]
+optional = true
+outputs = ["godfather-recomp/assets/ui_font.bin"]
+
+[[step]]
+id = "gps"
+title = "GPS road network (the AI drivers' road graphs of every district)"
+run = ["{python}", "{port}/tools/gf_gps_build.py", "{usrdir}", "{port}/assets/gf_gps.bin"]
+optional = true
+outputs = ["godfather-recomp/assets/gf_gps.bin"]
 
 [[step]]
 id = "wheel-atlas"
@@ -316,7 +334,7 @@ forbid = [
   "godfather-recomp/texreplace/**", "godfather-recomp/texreplace_src/logo_reborn.png",
   "godfather-recomp/assets/gf_blood.bin", "godfather-recomp/assets/gf_sfx_bodyhit.bin",
   "godfather-recomp/assets/gf_kbm_glyphs.bin", "godfather-recomp/assets/gf_collision.bin",
-  "godfather-recomp/assets/gf_dialogue.txt", "godfather-recomp/assets/gf_wheel.bin",
+  "godfather-recomp/assets/gf_dialogue.txt", "godfather-recomp/assets/gf_wheel.bin", "godfather-recomp/assets/gf_gps.bin", "godfather-recomp/assets/ui_font.bin",
   "Godfather, The - The Don's Edition (Europe)/**",
   "_public/**",
 ]

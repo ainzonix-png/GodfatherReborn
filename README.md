@@ -88,6 +88,7 @@ pick your display, graphics, controls, language and mods, then press **Play**.
 | B | Store (inside a business) |
 | U | Sit down / stand up |
 | J | Smoke a cigarette |
+| G | Next GPS target (in a car; D-pad right on a controller) |
 | F10 | Trainer |
 | F11 | Fullscreen / window |
 
