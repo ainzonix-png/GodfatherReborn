@@ -44,7 +44,6 @@ on your own PC, from your own disc.
 |---|---|
 | **Frame rate** | Unlocked well past the original 30 FPS, with a frame limiter |
 | **Graphics** | Resolution scale, sharper shadows, texture filtering and upscaling, ambient occlusion, bloom, colour grading, sharpening and wet-street reflections when it rains |
-| **Upscaling** | NVIDIA DLSS and AMD FSR (with frame generation) when built with those SDKs |
 | **Keyboard & mouse** | Full keyboard and mouse controls, mouse look on foot, PC button prompts, and keyboard versions of the SIXAXIS motion moves |
 | **Controllers** | Xbox (XInput) controllers, with the motion moves on buttons |
 | **Comfort** | Real cutscene skip, quit to desktop, 12 language options |
