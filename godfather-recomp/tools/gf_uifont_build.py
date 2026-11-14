@@ -63,12 +63,28 @@ def add_key_icons(src, tex, dst):
     x0, y0, x1, y1 = G.CELLS['DPAD']
     dp = Image.fromarray(ga[y0:y1, x0:x1].copy(), 'RGBA').copy(); px = dp.load()
     W, H = dp.size
-    for j in range(H):                                # the right arm in red: "D-pad right"
-        for i in range(int(W * 0.60), W):
+    # the right arm in red ("D-pad right"): the four arms are separate shapes, so take the solid shape whose centre
+    # lies furthest right, grown by one pixel into its own anti-aliased edge
+    comp, best, best_cx = {}, None, -1.0
+    for j in range(H):
+        for i in range(W):
+            if px[i, j][3] < 128 or (i, j) in comp: continue
+            todo, cells = [(i, j)], []
+            comp[(i, j)] = len(cells)
+            while todo:
+                a, b = todo.pop(); cells.append((a, b))
+                for n in ((a + 1, b), (a - 1, b), (a, b + 1), (a, b - 1)):
+                    if 0 <= n[0] < W and 0 <= n[1] < H and n not in comp and px[n][3] >= 128:
+                        comp[n] = 1; todo.append(n)
+            cx = sum(c[0] for c in cells) / len(cells)
+            if len(cells) > 8 and cx > best_cx: best, best_cx = cells, cx
+    arm = set(best or [])
+    edge = {(a + da, b + db) for a, b in arm for da in (-1, 0, 1) for db in (-1, 0, 1)}
+    for (i, j) in edge:
+        if 0 <= i < W and 0 <= j < H and px[i, j][3] > 0 and ((i, j) in arm or px[i, j][3] < 128):
             r, g, b, a = px[i, j]
-            if a > 40 and H * 0.30 < j < H * 0.70:
-                v = (r + g + b) / 765.0               # keep the arm's shading
-                px[i, j] = (int(150 + 105 * v), int(20 + 40 * v), int(20 + 40 * v), a)
+            v = (r + g + b) / 765.0                   # keep the arm's shading
+            px[i, j] = (int(150 + 105 * v), int(20 + 40 * v), int(20 + 40 * v), a)
     add(0xF084, dp)
     for c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789':
         add(0xF300 + ord(c), G.g_key(64, 64, c))
