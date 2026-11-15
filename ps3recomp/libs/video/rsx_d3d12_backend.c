@@ -153,6 +153,31 @@ static inline int rfast(int bit)
     if (__builtin_expect(m < 0, 0)) m = rfast_init();
     return m & bit;
 }
+/* v1129V GF_FIFO_FAST3 (code default 0 = old): FIFO-thread record cost, the GPU receives the same bytes.
+ *   0x1  d3d12_bind_texture skips a call whose 9 texture registers AND resolved address equal the last call for that
+ *        unit, when the format is not B8 (B8 re-dirties the legacy atlas) and s_d3d.tex_bound == 0 (a non-B8 call
+ *        sets it to 0 or leaves it): the body writes only cur_texs[unit] (pure function of those inputs; nothing
+ *        else writes cur_texs) plus the tex_* globals for B8 -> the skipped call would store identical values.
+ *        Off with the debug observers TEX_PROBE (reads texture memory) / CUBEDBG / MOVIE_BIND / TEXFMTDBG.
+ *   0x2  VCB_DEDUP is no longer disabled by VP_NOFIXPROJ (Godfather play.cmd sets it): with VP_NOFIXPROJ set and
+ *        VP_FIXPROJ unset the garbage-projection fallback at the end of vp_record_cb can never run, so a slot is
+ *        exactly constants + epilogue = what the v219g dedup key covers (the same key every other title uses).
+ * GF_FIFO_FAST3=1 = both bits; GF_FIFO_FAST3_MASK=<hex> selects bits. 10 s report "[v1129V] bind_texture ...". */
+static int s_v1129v_f3 = -1;
+static int v1129v_f3(int bit)
+{
+    int m = s_v1129v_f3;
+    if (__builtin_expect(m < 0, 0)) {
+        const char* e = getenv("GF_FIFO_FAST3");
+        m = (e && *e == '1') ? 0x3 : 0;
+        if (m) { const char* k = getenv("GF_FIFO_FAST3_MASK"); if (k && *k) m = (int)(strtoul(k, NULL, 16) & 0x3u); }
+        if ((m & 1) && (getenv("TEX_PROBE") || getenv("CUBEDBG") || getenv("MOVIE_BIND") || getenv("TEXFMTDBG"))) m &= ~1;
+        fprintf(stderr, "[v1129V] FIFO record fast paths (GF_FIFO_FAST3): %s mask 0x%X (1 identical bind_texture skip, 2 VCB_DEDUP with VP_NOFIXPROJ)%c",
+                m ? "ON" : "off", (unsigned)m, 10);
+        s_v1129v_f3 = m;
+    }
+    return m & bit;
+}
 /* v1129X GPU-side switches (all code default 0 = old behaviour; one "[v1129X] ... ON" line each when enabled):
  *   GF_GPU_TIMING=1    D3D12 timestamps per render-target pass + the two post-FX calls, read back from a 3-frame ring
  *                      (frame N reads N-2, never waits); every 10 s "[v1129X gpu]" lines: GPU busy ms per frame (first
@@ -10127,7 +10152,7 @@ static void vp_record_cb(u32 slot, int vs_idx, const D3D12DrawRecord* dr)
         if (s_vcb_cmp < 0) { const char* c = getenv("VCB_CMP"); s_vcb_cmp = (c && *c == '1') ? 1 : 0; }
         if (dd < 0) { const char* e = getenv("VCB_DEDUP"); dd = (e && *e == '0') ? 0 : 1;
             if (getenv("VP_MVP") || getenv("RSX_DBG_CB") || getenv("DBG_ZOOM") || getenv("VPC_DUMP_FP") || getenv("VPC_DUMP_VS") ||
-                getenv("VP_FIXPROJ") || getenv("VP_NOFIXPROJ")) dd = 0;
+                getenv("VP_FIXPROJ") || (getenv("VP_NOFIXPROJ") && !v1129v_f3(2))) dd = 0;   /* v1129V 0x2: NOFIXPROJ = fallback never runs */
             fprintf(stderr, "[VCB_DEDUP] v219g identical VP constant slots re-used: %s (ABX 0x8000000 = off)%c", dd ? "ON" : "off", 10); }
         rsx_state* stw = (rsx_state*)st;
         const int cchg = stw->vertex_constants_dirty; stw->vertex_constants_dirty = 0;
@@ -21023,7 +21048,7 @@ static void dc_report(void)
     s_dc_reuse_chunks = s_dc_reuse_indices = 0;
 }
 
-static void d3d12_bind_texture(void* ud, u32 unit, const rsx_texture_state* tex)
+static void d3d12_bind_texture_v1129v_body(void* ud, u32 unit, const rsx_texture_state* tex)   /* v1129V: was d3d12_bind_texture */
 {
     (void)ud;
     extern uint8_t* vm_base;
@@ -21242,6 +21267,41 @@ static void d3d12_bind_texture(void* ud, u32 unit, const rsx_texture_state* tex)
         s_d3d.tex_dirty = 1;
     } else {
         s_d3d.tex_bound = 0;
+    }
+}
+
+/* v1129V GF_FIFO_FAST3 0x1: identical re-binds (see v1129v_f3). The comparison resolves the address exactly like the
+ * body's VP branch (TEX_RESOLVE_AUTO: IO table first, then the location bits), so a remapped IO/local page is a miss. */
+static struct { u32 reg[9]; u32 r; int valid; } s_v1129v_bt[RSX_D3D_TEX_UNITS];
+static unsigned long long s_v1129v_bt_calls, s_v1129v_bt_skips, s_v1129v_bt_t0;
+static void d3d12_bind_texture(void* ud, u32 unit, const rsx_texture_state* tex)
+{
+    if (!v1129v_f3(1)) { d3d12_bind_texture_v1129v_body(ud, unit, tex); return; }
+    extern u32 cellGcmResolveLocated(int local, u32 offset);
+    extern u32 cellGcmResolveIO(u32);
+    static int ra = -1; if (ra < 0) ra = getenv("TEX_RESOLVE_AUTO") ? 1 : 0;
+    u32 r = ra ? cellGcmResolveIO(tex->offset) : 0;
+    if (!r) r = cellGcmResolveLocated((tex->format & 3) == 1, tex->offset);
+    const u32 reg[9] = { tex->offset, tex->format, tex->address, tex->control0, tex->control1, tex->filter,
+                         tex->image_rect, tex->border_color, tex->control3 };
+    s_v1129v_bt_calls++;
+    int skip = 0;
+    if (unit < RSX_D3D_TEX_UNITS && s_v1129v_bt[unit].valid && s_d3d.tex_bound == 0 &&
+        (((tex->format >> 8) & 0x9Fu) != 0x81u) && s_v1129v_bt[unit].r == r &&
+        !memcmp(s_v1129v_bt[unit].reg, reg, sizeof reg)) skip = 1;
+    if (skip) s_v1129v_bt_skips++;
+    else {
+        d3d12_bind_texture_v1129v_body(ud, unit, tex);
+        if (unit < RSX_D3D_TEX_UNITS) { memcpy(s_v1129v_bt[unit].reg, reg, sizeof reg); s_v1129v_bt[unit].r = r; s_v1129v_bt[unit].valid = 1; }
+    }
+    if ((s_v1129v_bt_calls & 1023u) == 0) {
+        const unsigned long long now = GetTickCount64();
+        if (!s_v1129v_bt_t0) s_v1129v_bt_t0 = now;
+        else if (now - s_v1129v_bt_t0 >= 10000) {
+            fprintf(stderr, "[v1129V] 10 s: bind_texture %llu calls, %llu identical re-binds skipped (%.1f %%)%c",
+                    s_v1129v_bt_calls, s_v1129v_bt_skips, 100.0 * (double)s_v1129v_bt_skips / (double)s_v1129v_bt_calls, 10);
+            s_v1129v_bt_calls = s_v1129v_bt_skips = 0; s_v1129v_bt_t0 = now;
+        }
     }
 }
 

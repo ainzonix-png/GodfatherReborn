@@ -44,8 +44,11 @@ static uint64_t s_gf_hotfn_mask;
 enum {
     GF_HOTFN2_0054665C = 1u << 0,
     GF_HOTFN2_0070AF14 = 1u << 1,
+    GF_HOTFN2_LEANNAN  = 1u << 2,   /* v1129K: bits 0/1 bodies with one NaN test per op (gf_hot3_*) */
 };
 static uint64_t s_gf_hotfn2;
+static int gf_hot3_0054665C(ppu_context* ctx);   /* v1129K */
+static int gf_hot3_0070AF14(ppu_context* ctx);   /* v1129K */
 static void gf_hotfn2_resolve(void);
 
 /* v1129N: gf_common is compiled for baseline x86-64 (only the lifted gf_ppu objects get PORT_PPU_ISA's
@@ -1507,6 +1510,7 @@ static void gf_hotfn2_resolve(void) { }
 int gf_hot_0054665C(ppu_context* ctx) {
         uint8_t* const gf_vmb = vm_base;
         if (!(s_gf_hotfn2 & GF_HOTFN2_0054665C) || g_v243a_sel != 3) return 0;
+        if (s_gf_hotfn2 & GF_HOTFN2_LEANNAN) return gf_hot3_0054665C(ctx);   /* v1129K */
         uint64_t r0 = ctx->gpr[0];
         uint64_t r1 = ctx->gpr[1];
         uint64_t r2 = ctx->gpr[2];
@@ -1599,6 +1603,7 @@ gf_wb:
 int gf_hot2_0070AF14(ppu_context* ctx) {
         uint8_t* const gf_vmb = vm_base;
         if (!(s_gf_hotfn2 & GF_HOTFN2_0070AF14) || g_v243a_sel != 3) return 0;
+        if (s_gf_hotfn2 & GF_HOTFN2_LEANNAN) return gf_hot3_0070AF14(ctx);   /* v1129K */
         uint64_t r1 = ctx->gpr[1];
         uint64_t r3 = ctx->gpr[3];
         uint64_t r4 = ctx->gpr[4];
@@ -1749,6 +1754,284 @@ gf_wb:
         ctx->fpr[29] = f29;
         ctx->fpr[30] = f30;
         ctx->fpr[31] = f31;
+        return 1;
+}
+
+
+/* ---- v1129K GF_HOTFN2 bit 2: lean NaN tests for the register-promoted bodies (bit 0 / bit 1).
+ * The lift's ppu_fp_bin / ppu_fmadd_core test every input for NaN, then the result (3-4 compare+branch per op), and
+ * ppu_fp_single tests again. On x86 a NaN input always gives a NaN result (addsd/subsd/mulsd/vfmadd*), so ONE test of
+ * the raw host result is enough to know that no input and no result was NaN -- and then the lift returns exactly that
+ * raw result (rounded to single). If the raw result IS NaN we redo the op with the lift's own helpers, which pick the
+ * PPC NaN (quieted first NaN operand / default 0x7FF8.. qNaN). Same ops, same order, same rounding -> bit-identical. */
+GF_HOT_INL double gf_fadds(double a, double b)
+{
+    const double r = a + b;
+    if (__builtin_expect(r != r, 0)) return ppu_fp_single(ppu_fadd(a, b));
+    return (double)(float)r;
+}
+GF_HOT_INL double gf_fsubs(double a, double b)
+{
+    const double r = a - b;
+    if (__builtin_expect(r != r, 0)) return ppu_fp_single(ppu_fsub(a, b));
+    return (double)(float)r;
+}
+GF_HOT_INL double gf_fmuls(double a, double b)
+{
+    const double r = a * b;
+    if (__builtin_expect(r != r, 0)) return ppu_fp_single(ppu_fmul(a, b));
+    return (double)(float)r;
+}
+GF_HOT_INL double gf_fmas(double a, double c, double b, int neg_b, int neg_res)
+{
+    const double r = fma(a, c, neg_b ? -b : b);
+    if (__builtin_expect(r != r, 0)) return ppu_fp_single(ppu_fmadd_core(a, c, b, neg_b, neg_res));
+    return (double)(float)(neg_res ? -r : r);
+}
+
+/* v1129K: the bit-0 / bit-1 bodies of v1129N with the lean NaN tests above (generated: ppu_fp_single(ppu_fX(..)) ->
+ * gf_fXs(..); nothing else changed). Called only from gf_hot_0054665C / gf_hot2_0070AF14 after their gates. */
+static int gf_hot3_0070AF14(ppu_context* ctx) {
+        uint8_t* const gf_vmb = vm_base;
+        uint64_t r1 = ctx->gpr[1];
+        uint64_t r3 = ctx->gpr[3];
+        uint64_t r4 = ctx->gpr[4];
+        uint64_t r5 = ctx->gpr[5];
+        double f0 = ctx->fpr[0];
+        double f1 = ctx->fpr[1];
+        double f2 = ctx->fpr[2];
+        double f3 = ctx->fpr[3];
+        double f4 = ctx->fpr[4];
+        double f5 = ctx->fpr[5];
+        double f6 = ctx->fpr[6];
+        double f7 = ctx->fpr[7];
+        double f8 = ctx->fpr[8];
+        double f9 = ctx->fpr[9];
+        double f10 = ctx->fpr[10];
+        double f11 = ctx->fpr[11];
+        double f12 = ctx->fpr[12];
+        double f13 = ctx->fpr[13];
+        double f27 = ctx->fpr[27];
+        double f28 = ctx->fpr[28];
+        double f29 = ctx->fpr[29];
+        double f30 = ctx->fpr[30];
+        double f31 = ctx->fpr[31];
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x10); float ftmp; memcpy(&ftmp, &tmp, 4); f10 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x4); float ftmp; memcpy(&ftmp, &tmp, 4); f9 = ftmp; }
+        f5 = gf_fmuls(f9, f10);
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x0); float ftmp; memcpy(&ftmp, &tmp, 4); f7 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x0); float ftmp; memcpy(&ftmp, &tmp, 4); f11 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x8); float ftmp; memcpy(&ftmp, &tmp, 4); f3 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x20); float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x14); float ftmp; memcpy(&ftmp, &tmp, 4); f8 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x14); float ftmp; memcpy(&ftmp, &tmp, 4); f13 = ftmp; }
+        f9 = gf_fmuls(f9, f8);
+        f10 = gf_fmuls(f13, f10);
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x4); float ftmp; memcpy(&ftmp, &tmp, 4); f12 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x10); float ftmp; memcpy(&ftmp, &tmp, 4); f0 = ftmp; }
+        f13 = gf_fmuls(f13, f8);
+        { uint64_t tmp; memcpy(&tmp, &f30, 8); gf_st64(gf_vmb, r1 + -0x10, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x18); float ftmp; memcpy(&ftmp, &tmp, 4); f6 = ftmp; }
+        f11 = gf_fmas(f11, f7, f5, 0, 0);
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x24); float ftmp; memcpy(&ftmp, &tmp, 4); f5 = ftmp; }
+        { uint64_t tmp; memcpy(&tmp, &f27, 8); gf_st64(gf_vmb, r1 + -0x28, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x18); float ftmp; memcpy(&ftmp, &tmp, 4); f27 = ftmp; }
+        { uint64_t tmp; memcpy(&tmp, &f29, 8); gf_st64(gf_vmb, r1 + -0x18, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x8); float ftmp; memcpy(&ftmp, &tmp, 4); f29 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x24); float ftmp; memcpy(&ftmp, &tmp, 4); f7 = ftmp; }
+        { uint64_t tmp; memcpy(&tmp, &f28, 8); gf_st64(gf_vmb, r1 + -0x20, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x28); float ftmp; memcpy(&ftmp, &tmp, 4); f28 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x20); float ftmp; memcpy(&ftmp, &tmp, 4); f8 = ftmp; }
+        { uint64_t tmp; memcpy(&tmp, &f31, 8); gf_st64(gf_vmb, r1 + -0x8, tmp); }
+        f11 = gf_fmas(f3, f2, f11, 0, 0);
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x28); float ftmp; memcpy(&ftmp, &tmp, 4); f31 = ftmp; }
+        { float ftmp = (float)f11; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x0, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x0); float ftmp; memcpy(&ftmp, &tmp, 4); f11 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x0); float ftmp; memcpy(&ftmp, &tmp, 4); f30 = ftmp; }
+        f12 = gf_fmas(f11, f12, f9, 0, 0);
+        f0 = gf_fmas(f0, f30, f10, 0, 0);
+        f12 = gf_fmas(f3, f5, f12, 0, 0);
+        f0 = gf_fmas(f6, f2, f0, 0, 0);
+        { float ftmp = (float)f12; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x4, tmp); }
+        { float ftmp = (float)f0; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x10, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x4); float ftmp; memcpy(&ftmp, &tmp, 4); f0 = ftmp; }
+        f0 = gf_fmuls(f0, f27);
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x4); float ftmp; memcpy(&ftmp, &tmp, 4); f1 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x10); float ftmp; memcpy(&ftmp, &tmp, 4); f10 = ftmp; }
+        f13 = gf_fmas(f10, f1, f13, 0, 0);
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x10); float ftmp; memcpy(&ftmp, &tmp, 4); f4 = ftmp; }
+        f12 = gf_fmuls(f7, f4);
+        f11 = gf_fmas(f11, f29, f0, 0, 0);
+        f13 = gf_fmas(f6, f5, f13, 0, 0);
+        f8 = gf_fmas(f8, f30, f12, 0, 0);
+        f3 = gf_fmas(f3, f28, f11, 0, 0);
+        { float ftmp = (float)f13; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x14, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x14); float ftmp; memcpy(&ftmp, &tmp, 4); f29 = ftmp; }
+        f2 = gf_fmas(f31, f2, f8, 0, 0);
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x14); float ftmp; memcpy(&ftmp, &tmp, 4); f0 = ftmp; }
+        f7 = gf_fmuls(f7, f29);
+        f0 = gf_fmuls(f0, f27);
+        { float ftmp = (float)f3; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x8, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x34); float ftmp; memcpy(&ftmp, &tmp, 4); f9 = ftmp; }
+        f4 = gf_fmuls(f9, f4);
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x30); float ftmp; memcpy(&ftmp, &tmp, 4); f13 = ftmp; }
+        { float ftmp = (float)f2; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x20, tmp); }
+        f9 = gf_fmuls(f9, f29);
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x20); float ftmp; memcpy(&ftmp, &tmp, 4); f8 = ftmp; }
+        f7 = gf_fmas(f8, f1, f7, 0, 0);
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x38); float ftmp; memcpy(&ftmp, &tmp, 4); f12 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x20); float ftmp; memcpy(&ftmp, &tmp, 4); f11 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x8); float ftmp; memcpy(&ftmp, &tmp, 4); f3 = ftmp; }
+        f10 = gf_fmas(f10, f3, f0, 0, 0);
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x38); float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
+        { uint64_t tmp = gf_ld64(gf_vmb, r1 + -0x28); memcpy(&f27, &tmp, 8); }
+        { uint64_t tmp = gf_ld64(gf_vmb, r1 + -0x18); memcpy(&f29, &tmp, 8); }
+        f13 = gf_fmas(f13, f30, f4, 0, 0);
+        { uint64_t tmp = gf_ld64(gf_vmb, r1 + -0x10); memcpy(&f30, &tmp, 8); }
+        f5 = gf_fmas(f31, f5, f7, 0, 0);
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x30); float ftmp; memcpy(&ftmp, &tmp, 4); f7 = ftmp; }
+        f6 = gf_fmas(f6, f28, f10, 0, 0);
+        f11 = gf_fmas(f12, f11, f13, 0, 0);
+        { float ftmp = (float)f5; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x24, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x24); float ftmp; memcpy(&ftmp, &tmp, 4); f10 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x34); float ftmp; memcpy(&ftmp, &tmp, 4); f5 = ftmp; }
+        { float ftmp = (float)f6; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x18, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x18); float ftmp; memcpy(&ftmp, &tmp, 4); f6 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x24); float ftmp; memcpy(&ftmp, &tmp, 4); f0 = ftmp; }
+        f0 = gf_fmuls(f0, f6);
+        f11 = gf_fadds(f11, f7);
+        f8 = gf_fmas(f8, f3, f0, 0, 0);
+        { float ftmp = (float)f11; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x30, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x30); float ftmp; memcpy(&ftmp, &tmp, 4); f13 = ftmp; }
+        f1 = gf_fmas(f13, f1, f9, 0, 0);
+        f31 = gf_fmas(f31, f28, f8, 0, 0);
+        { uint64_t tmp = gf_ld64(gf_vmb, r1 + -0x20); memcpy(&f28, &tmp, 8); }
+        f10 = gf_fmas(f12, f10, f1, 0, 0);
+        { float ftmp = (float)f31; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x28, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r5 + 0x28); float ftmp; memcpy(&ftmp, &tmp, 4); f11 = ftmp; }
+        { uint64_t tmp = gf_ld64(gf_vmb, r1 + -0x8); memcpy(&f31, &tmp, 8); }
+        f10 = gf_fadds(f10, f5);
+        { float ftmp = (float)f10; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x34, tmp); }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x34); float ftmp; memcpy(&ftmp, &tmp, 4); f0 = ftmp; }
+        f0 = gf_fmuls(f0, f6);
+        f13 = gf_fmas(f13, f3, f0, 0, 0);
+        f12 = gf_fmas(f12, f11, f13, 0, 0);
+        f12 = gf_fadds(f12, f2);
+        { float ftmp = (float)f12; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r3 + 0x38, tmp); }
+        goto gf_wb;
+gf_wb:
+        ctx->gpr[1] = r1;
+        ctx->gpr[3] = r3;
+        ctx->gpr[4] = r4;
+        ctx->gpr[5] = r5;
+        ctx->fpr[0] = f0;
+        ctx->fpr[1] = f1;
+        ctx->fpr[2] = f2;
+        ctx->fpr[3] = f3;
+        ctx->fpr[4] = f4;
+        ctx->fpr[5] = f5;
+        ctx->fpr[6] = f6;
+        ctx->fpr[7] = f7;
+        ctx->fpr[8] = f8;
+        ctx->fpr[9] = f9;
+        ctx->fpr[10] = f10;
+        ctx->fpr[11] = f11;
+        ctx->fpr[12] = f12;
+        ctx->fpr[13] = f13;
+        ctx->fpr[27] = f27;
+        ctx->fpr[28] = f28;
+        ctx->fpr[29] = f29;
+        ctx->fpr[30] = f30;
+        ctx->fpr[31] = f31;
+        return 1;
+}
+
+static int gf_hot3_0054665C(ppu_context* ctx) {
+        uint8_t* const gf_vmb = vm_base;
+        uint64_t r0 = ctx->gpr[0];
+        uint64_t r1 = ctx->gpr[1];
+        uint64_t r2 = ctx->gpr[2];
+        uint64_t r3 = ctx->gpr[3];
+        uint64_t r4 = ctx->gpr[4];
+        uint64_t r9 = ctx->gpr[9];
+        uint64_t r11 = ctx->gpr[11];
+        double f0 = ctx->fpr[0];
+        double f2 = ctx->fpr[2];
+        double f3 = ctx->fpr[3];
+        double f4 = ctx->fpr[4];
+        double f5 = ctx->fpr[5];
+        double f6 = ctx->fpr[6];
+        double f7 = ctx->fpr[7];
+        double f8 = ctx->fpr[8];
+        double f9 = ctx->fpr[9];
+        double f10 = ctx->fpr[10];
+        double f11 = ctx->fpr[11];
+        double f12 = ctx->fpr[12];
+        double f13 = ctx->fpr[13];
+        r9 = r3 + (int64_t)(0x10);
+        r11 = gf_ld32(gf_vmb, r2 + -0x7394);
+        { uint32_t tmp = gf_ld32(gf_vmb, r3 + 0x0); float ftmp; memcpy(&ftmp, &tmp, 4); f0 = ftmp; }
+        r9 = ppc_rldicl(r9, 0, 32);
+        { uint32_t tmp = gf_ld32(gf_vmb, r11 + 0x18); float ftmp; memcpy(&ftmp, &tmp, 4); f11 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x0); float ftmp; memcpy(&ftmp, &tmp, 4); f2 = ftmp; }
+        f11 = gf_fadds(f11, f11);
+        { uint32_t tmp = gf_ld32(gf_vmb, r9 + 0x0); float ftmp; memcpy(&ftmp, &tmp, 4); f10 = ftmp; }
+        f5 = fabs(f2);
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0xC); float ftmp; memcpy(&ftmp, &tmp, 4); f9 = ftmp; }
+        f6 = gf_fsubs(f10, f0);
+        f9 = gf_fadds(f9, f9);
+        { uint32_t tmp = gf_ld32(gf_vmb, r3 + 0x4); float ftmp; memcpy(&ftmp, &tmp, 4); f13 = ftmp; }
+        f10 = gf_fadds(f10, f0);
+        { uint32_t tmp = gf_ld32(gf_vmb, r9 + 0x4); float ftmp; memcpy(&ftmp, &tmp, 4); f12 = ftmp; }
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x4); float ftmp; memcpy(&ftmp, &tmp, 4); f4 = ftmp; }
+        f8 = gf_fsubs(f12, f13);
+        f3 = fabs(f4);
+        { uint32_t tmp = gf_ld32(gf_vmb, r3 + 0x8); float ftmp; memcpy(&ftmp, &tmp, 4); f7 = ftmp; }
+        f12 = gf_fadds(f12, f13);
+        { uint32_t tmp = gf_ld32(gf_vmb, r9 + 0x8); float ftmp; memcpy(&ftmp, &tmp, 4); f0 = ftmp; }
+        f13 = gf_fsubs(f0, f7);
+        f0 = gf_fadds(f0, f7);
+        f6 = gf_fmas(f6, f5, f11, 0, 0);
+        { uint32_t tmp = gf_ld32(gf_vmb, r4 + 0x8); float ftmp; memcpy(&ftmp, &tmp, 4); f5 = ftmp; }
+        f11 = fabs(f5);
+        f10 = gf_fmas(f10, f2, f9, 0, 0);
+        f8 = gf_fmas(f8, f3, f6, 0, 0);
+        f12 = gf_fmas(f12, f4, f10, 0, 0);
+        f13 = gf_fmas(f13, f11, f8, 0, 0);
+        f0 = gf_fmas(f0, f5, f12, 0, 0);
+        f12 = gf_fadds(f0, f13);
+        f13 = gf_fsubs(f13, f0);
+        { float ftmp = (float)f12; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r1 + -0x10, tmp); }
+        r0 = gf_ld32(gf_vmb, r1 + -0x10);
+        { float ftmp = (float)f13; uint32_t tmp; memcpy(&tmp, &ftmp, 4); gf_st32(gf_vmb, r1 + -0x10, tmp); }
+        r3 = gf_ld32(gf_vmb, r1 + -0x10);
+        r0 = (uint64_t)ppc_rlwinm((uint32_t)r0, 1, 31, 31);
+        r3 = (uint64_t)ppc_rlwinm((uint32_t)r3, 1, 31, 31);
+        r3 = r3 - r0;
+        r3 = r3 + (int64_t)(2);
+        r3 = ppc_rldicl(r3, 0, 32);
+        goto gf_wb;
+gf_wb:
+        ctx->gpr[0] = r0;
+        ctx->gpr[1] = r1;
+        ctx->gpr[2] = r2;
+        ctx->gpr[3] = r3;
+        ctx->gpr[4] = r4;
+        ctx->gpr[9] = r9;
+        ctx->gpr[11] = r11;
+        ctx->fpr[0] = f0;
+        ctx->fpr[2] = f2;
+        ctx->fpr[3] = f3;
+        ctx->fpr[4] = f4;
+        ctx->fpr[5] = f5;
+        ctx->fpr[6] = f6;
+        ctx->fpr[7] = f7;
+        ctx->fpr[8] = f8;
+        ctx->fpr[9] = f9;
+        ctx->fpr[10] = f10;
+        ctx->fpr[11] = f11;
+        ctx->fpr[12] = f12;
+        ctx->fpr[13] = f13;
         return 1;
 }
 
