@@ -220,6 +220,24 @@ static void resolve_types(uint32_t mgr)
 
 static uint32_t slot_ea(uint32_t mgr, int s) { return mgr + 0x44u + 0x2Cu * (uint32_t)s; }
 
+/* ---------------------------------------------------------------- radar draw order
+ * func_00509B38 draws the radar markers in slot order (0..199, later = on top). The game's icons usually hold the low
+ * slots, so the dots (allocated later) covered them. Its slot loop asks here which slot to draw at step i: our dots
+ * first, then every other slot in its usual order, so the icons draw over the route. Always a permutation of 0..199. */
+uint32_t gf_gps_draw_slot(uint32_t mgr, uint32_t i)
+{
+    static uint8_t order[NSLOT];
+    if (i >= NSLOT) return i;
+    if (i == 0) {
+        uint8_t mine[NSLOT]; int n = 0;
+        memset(mine, 0, sizeof mine);
+        if (mgr == G.mgr) for (int k = 0; k < G.nids && k < MAXDOTS; k++) if (G.ids[k] >= 0 && G.ids[k] < NSLOT) mine[G.ids[k]] = 1;
+        for (int s = 0; s < NSLOT; s++) if (mine[s]) order[n++] = (uint8_t)s;
+        for (int s = 0; s < NSLOT; s++) if (!mine[s]) order[n++] = (uint8_t)s;
+    }
+    return order[i];
+}
+
 /* ---------------------------------------------------------------- per HUD update */
 void gf_gps_hud(uint64_t hud64)
 {
