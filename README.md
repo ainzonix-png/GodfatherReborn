@@ -149,3 +149,4 @@ works with.
   port leans on and the decryption step.
 - [Jolt Physics](https://github.com/jrouwe/JoltPhysics) by Jorrit Rouwe.
 - EA Redwood Shores, for the game.
+- [ainzonix-png](https://github.com/ainzonix-png), for the trainer's rain toggle.
