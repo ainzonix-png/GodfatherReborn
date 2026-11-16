@@ -127,7 +127,7 @@
          ctx->gpr[5] = (int64_t)(int32_t)(0);
          ctx->gpr[29] = ctx->gpr[3] | ctx->gpr[3];
          ctx->gpr[4] = vm_read32(ctx->gpr[2] + 0x6DF8);
-@@ -236032,6 +236088,59 @@
+@@ -236032,6 +236088,82 @@
  loc_004E61CC:
          { float ftmp = (float)ctx->fpr[13]; uint32_t tmp; memcpy(&tmp, &ftmp, 4); vm_write32(ctx->gpr[10] + 0x0, tmp); }
  loc_004E61D0:
@@ -151,13 +151,36 @@
 +             * per frame (max 10 % of a period), so game speed stays real time. Long frames / hitches use the
 +             * measured time; a debt beyond 100 ms is handed over at once. */
 +            { static int sm = -1; static double debt = 0.0;
-+              if (sm < 0) { const char* e = getenv("GF_DT_SMOOTH"); sm = (e && *e == '0') ? 0 : 1;
-+                            fprintf(stderr, "[V1050S] game timestep locked to the frame pacer's period (GF_DT_SMOOTH): %s\n", sm ? "ON" : "off"); }
++              if (sm < 0) { const char* e = getenv("GF_DT_SMOOTH"); sm = (e && *e == '0') ? 0 : (e && *e == '2') ? 2 : 1;
++                            fprintf(stderr, "[V1050S] game timestep smoothing (GF_DT_SMOOTH): %s\n", sm == 2 ? "2 = averaged real frame time" : sm ? "1 = locked to the pacer period" : "off"); }
 +              const double per = g_gf_pace_per;
 +              const double sched_dt = g_gf_sched_dt; g_gf_sched_dt = 0.0;   /* v1051P: consumed once per tick */
 +              if (sched_dt > 0.0) {
 +                  dt = sched_dt < 0.001 ? 0.001 : (sched_dt > 0.083415 ? 0.083415 : sched_dt);
 +                  debt = 0.0;
++              } else if (sm == 2 && per > 0.0) {
++                  /* GF_DT_SMOOTH=2: mode 1 snapped every frame within +-50 % of the pacer period to exactly that period.
++                   * Below the 180 target (city: 8-10 ms frames vs 5.56 ms) frames hover at the 8.33 ms edge, so the game
++                   * alternated between steps ~35 % too short and full measured steps -> the camera / player "snapped"
++                   * every few steps, worse the closer the frame rate gets to the edge. Here every normal frame advances
++                   * by a running average of the real frame time (EMA, 10 %), the same debt keeps game speed exactly real
++                   * time, and hitches (> 2.5x the average) use the measured time. No effect on the frame rate. */
++                  static double ema = 0.0;
++                  if (ema <= 0.0) ema = dt;
++                  const int hitch = dt > 2.5 * ema;
++                  if (!hitch) ema += (dt - ema) * 0.1;
++                  debt += dt;
++                  double use = hitch ? dt : ema;
++                  double c = (debt - use) * 0.1; const double lim = 0.1 * use;
++                  if (c > lim) c = lim;
++                  if (c < -lim) c = -lim;
++                  use += c;
++                  if (debt - use > 0.1 || debt - use < -0.1) use = debt;
++                  if (use < 0.001) use = 0.001;
++                  if (use > 0.083415) use = 0.083415;
++                  debt -= use;
++                  if (debt > 0.25 || debt < -0.25) debt = 0.0;
++                  dt = use;
 +              } else if (sm && per > 0.0) {
 +                  debt += dt;
 +                  double use = (fabs(dt - per) < 0.5 * per) ? per : dt;
@@ -187,7 +210,7 @@
          ctx->gpr[10] = vm_read32(ctx->gpr[2] + 0x7EB8);
          ctx->fpr[9] = ctx->fpr[11];
          ctx->gpr[9] = vm_read32(ctx->gpr[2] + 0x7EC4);
-@@ -236068,6 +236177,21 @@
+@@ -236068,6 +236200,21 @@
          { uint64_t tmp; memcpy(&tmp, &ctx->fpr[13], 8); vm_write64(ctx->gpr[1] + 0x80, tmp); }
          ctx->gpr[0] = vm_read64(ctx->gpr[1] + 0x80);
          vm_write32(ctx->gpr[7] + 0x0, ctx->gpr[0]);
@@ -209,7 +232,7 @@
          ctx->lr = 0x004E6264; func_0045E270(ctx); DRAIN_TRAMPOLINE(ctx);
          /* nop */;
          { int64_t a = (int64_t)ctx->gpr[3]; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; ctx->cr = (ctx->cr & ~(0xFu << 0)) | (cr_val << 0); }
-@@ -236143,6 +236267,30 @@
+@@ -236143,6 +236290,30 @@
          ctx->gpr[0] = vm_read64(ctx->gpr[1] + 0x80);
          vm_write32(ctx->gpr[8] + 0x0, ctx->gpr[0]);
  loc_004E637C:
@@ -240,7 +263,7 @@
          ctx->gpr[0] = vm_read64(ctx->gpr[1] + 0xC0);
          vm_write32(ctx->gpr[29] + 0xC, ctx->gpr[30]);
          ctx->gpr[31] = _cs_31;
-@@ -277906,7 +278054,7 @@
+@@ -277906,7 +278077,7 @@
          ctx->fpr[25] = ppu_fp_single(ppu_fmul(ctx->fpr[23], ctx->fpr[0]));
          ctx->fpr[20] = ppu_fp_single(ppu_fmul(ctx->fpr[23], ctx->fpr[13]));
  loc_00509C2C:
@@ -249,7 +272,7 @@
          ctx->gpr[30] = (int64_t)(int32_t)ctx->gpr[9];
          ctx->gpr[9] = (uint64_t)((int64_t)ctx->gpr[9] * (int64_t)(0x2C));
          ctx->gpr[9] = ctx->gpr[9] + ctx->gpr[27];
-@@ -419687,6 +419835,7 @@
+@@ -419687,6 +419858,7 @@
          return;
  }
  
@@ -257,7 +280,7 @@
  void func_005844F0(ppu_context* ctx) {
          uint64_t _cs_25 = ctx->gpr[25];
          uint64_t _cs_26 = ctx->gpr[26];
-@@ -419787,6 +419936,9 @@
+@@ -419787,6 +419959,9 @@
          ctx->gpr[3] = ctx->gpr[31] | ctx->gpr[31];
          ctx->lr = 0x0058464C; func_0089DA78(ctx); DRAIN_TRAMPOLINE(ctx);
          /* nop */;
@@ -267,7 +290,7 @@
          { int64_t a = (int64_t)ctx->gpr[28]; int64_t b = (int64_t)0; uint32_t cr_val = (a < b) ? 8 : (a > b) ? 4 : 2; ctx->cr = (ctx->cr & ~(0xFu << 0)) | (cr_val << 0); }
          if (((ctx->cr >> 0) & 2)) goto loc_005845A0;
          goto loc_0058460C;
-@@ -544143,6 +544295,7 @@
+@@ -544143,6 +544318,7 @@
  }
  
  void func_005F0DF8(ppu_context* ctx) {
@@ -275,11 +298,10 @@
          uint64_t _cs_29 = ctx->gpr[29];
          uint64_t _cs_30 = ctx->gpr[30];
          uint64_t _cs_31 = ctx->gpr[31];
-@@ -599528,4 +599681,18 @@
- loc_0061FE50:
+@@ -599529,3 +599705,17 @@
          ctx->gpr[30] = ctx->gpr[29] + (int64_t)(int32_t)((uint32_t)0x1 << 16);
          goto loc_0061FE04;
-+}
+ }
 +
 +/* v1054T gf_ragdoll.c: entity animation update func_0046316C(entity, dt) -> tells the ragdoll which entity a skeleton belongs to */
 +extern "C" uint32_t gf_rag_ent_begin(uint32_t ent);
@@ -293,4 +315,4 @@
 +        gf_rag_ent_end(_rag_prev);
 +        gf_coop_after_anim(_co_ent);   /* v1058E hand edit: co-op pose capture of the local player */
 +        gf_world_anim_seen(_co_ent);   /* v1060W1 hand edit: world sync liveness */
- }
++}
