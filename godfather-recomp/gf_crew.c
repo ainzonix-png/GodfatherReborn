@@ -379,6 +379,8 @@ static int crew_hire_order(uint32_t pl, uint32_t ent)
  * tries each slot and keeps the one that gives this door. */
 int gf_crew_door_want(uint64_t sent64)
 {
+    { extern uint32_t gf_crewdrive_board_driver(void); const uint32_t bd = gf_crewdrive_board_driver();   /* "You drive": the driver's door */
+      if (bd && (uint32_t)sent64 == bd) return 0xA; }
     if (!envi("GF_CREW_CAR", 1)) return 0;
     __try {
         const uint32_t e = (uint32_t)sent64, pl = player(); if (!pl || !ok(e) || e == pl || rd32(pl + 0x2A20) < 2) return 0;
@@ -447,6 +449,8 @@ static void crew_arrange(uint32_t pl, uint32_t smA, uint32_t smB)
 static uint32_t crew_vehicle_of(uint32_t e) { return (rd32(e + 0x5C4) & 8u) ? rd32(e + 0x1718) : 0; }
 int gf_crew_entry_id(int id, uint64_t vh_addr64, uint64_t ent64)
 {
+    { extern uint32_t gf_crewdrive_board_driver(void); const uint32_t bd = gf_crewdrive_board_driver();
+      if (bd && (uint32_t)ent64 == bd) return 0xA; }
     if (!envi("GF_CREW_CAR", 1) || id != 0xD) return id;
     const uint32_t vh = rd32((uint32_t)vh_addr64), veh = vh >= 0x38u ? vh - 0x38u : 0, ent = (uint32_t)ent64;
     const uint32_t pl = player(); if (!pl || !veh) return id;
@@ -458,6 +462,14 @@ int gf_crew_entry_id(int id, uint64_t vh_addr64, uint64_t ent64)
     return r;
 }
 static struct { uint32_t sm; ULONGLONG t; uint32_t seat; } s_tog[4];
+/* gf_crewdrive.c: the NPCRailShooterSM of a crew member sitting in a car (seen by UpdateInputToggle in the last 2 s) */
+uint32_t gf_crew_sm_of(uint32_t ent)
+{
+    const ULONGLONG now = GetTickCount64();
+    for (int i = 0; i < 4; i++) if (s_tog[i].sm && now - s_tog[i].t < 2000 && rd32(s_tog[i].sm + 0x4C) == ent) return s_tog[i].sm;
+    return 0;
+}
+extern uint32_t gf_crewdrive_driver(void);
 static int crew_right(uint32_t seat) { return seat == 7 || seat == 9; }
 /* 1 = this crew member takes R (right window), 2 = Q (left window) */
 static int crew_role(int k, int o)
@@ -481,6 +493,8 @@ int gf_crew_input_turn(uint64_t sm64)
     __try {
         const uint32_t seat = rd32(sm + 0x68);
         if (seat != s_tog[k].seat) { s_tog[k].seat = seat; printf("[crew] crew member in car seat %u (%s side)\n", seat, crew_right(seat) ? "right" : "left"); fflush(stdout); }
+        { const uint32_t drv = gf_crewdrive_driver();   /* the crew member at the wheel keeps both hands on it */
+          if (drv && rd32(sm + 0x4C) == drv) { wr32(sm + 0xFC, rd32(sm + 0xFC) & ~0x300u); return 0; } }
         for (int i = 0; i < 4; i++) if (i != k && s_tog[i].sm) { o = i; break; }
         if (o < 0) return 1;                               /* alone in the car: the game's own controls */
         const int role = crew_role(k, o);

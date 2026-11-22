@@ -400,6 +400,7 @@ add_library(gf_common OBJECT
     gf_gps.c
     gf_crew.c             # two crew members, crew car seats + windows, crew medic
     gf_living.c           # Living City: street fights, police rules, busier streets
+    gf_crewdrive.c        # a crew member drives the player (B)
     gf_sit.c
     gf_perf.c
     gf_hotfn.c            # v1121F native hot-function fast paths (lane F)
